@@ -1,12 +1,13 @@
+import os
 import json
 import pickle
-from pathlib import Path
+
 
 import asyncio
 
 from crawchet.collect.crawl import JsonAsyncCrawler, WARCAsyncCrawler
 from crawchet.process import greatami
-from crawchet.utils.io import resolve_path
+from crawchet.utils import io as ioutil
 
 
 def dump_result(out_result, filename, pickle_onfail=True):
@@ -22,8 +23,8 @@ def dump_result(out_result, filename, pickle_onfail=True):
 
 
 def crawl_save_json(ga_file, outfile):
-    cleaned_datelinks = greatami.read_datelinks(ga_file)
-    cleaned_dates,cleaned_links = [*zip(*cleaned_datelinks)]
+    df_dtlinks = greatami.get_datelinkdf(ga_file)
+    cleaned_dates,cleaned_links = df_dtlinks.post_date.to_list(),df_dtlinks.url.to_list()
     
     jac = JsonAsyncCrawler()
     loop = asyncio.get_event_loop()
@@ -35,23 +36,26 @@ def crawl_save_json(ga_file, outfile):
     dump_result(out_result, outfile, True)
 
 
-def crawl_save_warc(urls_file, outfile):
-    with open(urls_file, 'r') as f:
-        nearest_urls = f.readlines()
+
+def crawl_save_warc(url_list, outfile):
+    if isinstance(url_list, str):
+        url_list = ioutil.read_list(url_list)
     
-    nearest_urls = list(map(str.strip,nearest_urls))
+    #url_list = list(map(str.strip,url_list))
     
     wac = WARCAsyncCrawler(warc_outfile=outfile)
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(wac.warcwrite_async(nearest_urls))
+    loop.run_until_complete(wac.crawl_urls(url_list))
 
 if __name__ == '__main__':
-    gafile_path = resolve_path('../data/raw/urls/greatamigurumi.json')
-    json_out = resolve_path('../data/raw/pages/async_allresult.json')
+    urlfile_path = ioutil.resolve_path('../data/raw/urls/')
+    gafile_path = ioutil.resolve_path('../data/interim/greatamigurumi.json')
 
-    urllist_path = resolve_path('../data/raw/urls/url_list_patched.txt')
-    warc_out = resolve_path('../data/raw/pages/patched_archives.warc.gz')
+    urllist_path = os.path.join(urlfile_path,'url_list.txt')
+    wb_urllist_path = os.path.join(urlfile_path,'archive_url_list.txt')
+
+
+    all_urls = ioutil.read_list(urllist_path, True) + ioutil.read_list(wb_urllist_path, True)
     
-
-    crawl_save_json(gafile_path, json_out)
-    crawl_save_warc(urllist_path, warc_out)
+    crawl_save_warc(all_urls, ioutil.resolve_path('../data/raw/pages/merged.warc.gz'))
+    
