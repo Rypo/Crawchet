@@ -1,5 +1,6 @@
 _*
 !__init__.py
+.env
 
 # Ignore data files but keep structure
 data/**
