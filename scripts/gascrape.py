@@ -7,9 +7,12 @@ from crawchet.utils.io import resolve_path
 
 if __name__ == '__main__':
     warc_out = resolve_path('../data/raw/pages/greatamigurumi.warc.gz')
-    json_out = resolve_path('../data/raw/urls/greatamigurumi.json')
-    #flat_out = Path('../data/raw/urls/xgreatamigurumi_flat.json').resolve().as_posix()
+    json_out = resolve_path('../data/interim/greatamigurumi.json')
     img_dir =  resolve_path('../data/raw/images/greatamigurumi/')
+
+    Path(warc_out).parent.mkdir(parents=True, exist_ok=True)
+    Path(json_out).parent.mkdir(parents=True, exist_ok=True)
+    Path(img_dir).mkdir(parents=True, exist_ok=True)
     
     ga_scraper = scrape.GreatAmigurumiScraper()
     gablog_data = ga_scraper.scrape(warc_out, timeout=1)
@@ -17,11 +20,3 @@ if __name__ == '__main__':
     with open(json_out,'w',encoding='UTF-8') as f:
         json.dump(gablog_data, f)
     
-
-    df_gaf = greatami.process_gafile(ga_file=json_out)
-    raw_images,bodyex_images,bodyex_ilinks = greatami.extract_links(df_gaf)
-
-    gaimg_path = Path(img_dir)
-    scrape.dl_greatami_imgs(raw_images, df_gaf['dirslug'], gaimg_path, overwrite=False)
-    scrape.dl_greatami_imgs(bodyex_images, df_gaf['dirslug'], gaimg_path, overwrite=False)
-    scrape.dl_greatami_imgs(bodyex_ilinks, df_gaf['dirslug'], gaimg_path, overwrite=False)
