@@ -1,59 +1,20 @@
 import re
 import json
-import urllib
 from typing import List, Dict, Union
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
 
-def imgurl_fix(src, large=True):
-    '''
-    blogspot image process params info
-    - https://sneeit.com/using-blogger-blogspot-image-url-structure-for-cropping-and-resizing/
-    - https://www.amp-blogger.com/2019/10/url-image-parameter-for-custom-blogger.html
-    - https://gist.github.com/Sauerstoffdioxid/2a0206da9f44dde1fdfce290f38d2703
-    '''
-    if not isinstance(src,str):
-        return src
-    if src.lower().startswith('//'):
-        src = 'http:'+src
-    if large:
-        src = re.sub(r'/s\d{1,3}/', r'/s1600/', src, flags=re.IGNORECASE)
-    return src
-
-def imgurls_fix(img_urls, large=True):
-    return [imgurl_fix(img, large) for img in img_urls]
+from crawchet.utils import uri as uutil
 
 def fix_bodylinks(body_extract):
     '''Modifies in-place'''
     for extr in body_extract:
-        extr.update(img_link=imgurl_fix(extr.get('img_link'), large=False))
-        extr.update(text_link=imgurl_fix(extr.get('text_link'), large=False))
-        extr['img_attrs'].update(src=imgurl_fix(extr['img_attrs'].get('src'), large=True))
+        extr.update(img_link=uutil.fix_imgurl(extr.get('img_link')))
+        extr.update(text_link=uutil.fix_urlscheme(extr.get('text_link')))
+        extr['img_attrs'].update(src=uutil.fix_imgurl(extr['img_attrs'].get('src')))
         
     return body_extract
-
-def url_to_fname(url):
-    '''
-    https://1.bp.blogspot.com/.../.../.../.../s1600/graduation_exam_success_crochet_bear.jpg ->
-    graduation_exam_success_crochet_bear.jpg
-    '''
-    parse_res = urllib.parse.urlparse(url)
-    fname = parse_res.path.split('/')[-1]
-    fname = urllib.parse.unquote_plus(fname)
-    fname = fname.replace(' ','_')
-    return fname
-
-def url_to_dirname(url):
-    '''
-    https://greatamigurumi.blogspot.com/2021/05/graduation-celebration-bear-free.html  ->
-    2021-05-graduation-celebration-bear-free/
-    '''
-    dirname = urllib.parse.urlparse(url).path
-    dirname = dirname.strip('/')
-    dirname = dirname.replace('/','-')
-    dirname = dirname.replace('.html','')
-    return dirname
 
 def extract_languages(df_gaf):
     # https://en.wikipedia.org/wiki/Languages_used_on_the_Internet
@@ -66,7 +27,7 @@ def extract_languages(df_gaf):
     text_langs = df_gaf['raw_text'].str.extractall(f"({'|'.join(langs)})", re.I|re.M).groupby(level=0).agg(list)[0]
     tag_langs = df_gaf['tag_list'].apply(lambda x: list(set(x)&set(langs)))
     lang_extracts = text_langs.reindex(tag_langs.index, fill_value=[])+tag_langs
-    lang_extracts = lang_extracts.apply(lambda x: list(dict.fromkeys([l.title() for l in x]).keys())) # unique, preserve order
+    lang_extracts = lang_extracts.apply(lambda x: list(dict.fromkeys([l.title() for l in x]))) # unique, preserve order
     return lang_extracts
 
 
@@ -78,7 +39,7 @@ def flatten_gadata(gadata: Union[str, Path, List[Dict]]) -> List[Dict]:
     flat_post_data = [post for page in gadata for post in page['page_data']]
     return flat_post_data
 
-def process_gafile(ga_file='../data/raw/urls/greatamigurumi.json'):    
+def process_gafile(ga_file='../data/interim/greatamigurumi.json'):    
     df_gaf = pd.json_normalize(flatten_gadata(ga_file))
     
     df_gaf.insert(0,'ptid',[f'{i:05d}' for i in range(len(df_gaf))])
@@ -100,52 +61,44 @@ def process_gafile(ga_file='../data/raw/urls/greatamigurumi.json'):
     
     df_gaf = df_gaf.drop(columns='footer')
     
-    df_gaf['raw_images'] = df_gaf['raw_images'].apply(imgurls_fix)
-    df_gaf['raw_links'] = df_gaf['raw_links'].apply(imgurls_fix, large=False)
+    df_gaf['raw_images'] = df_gaf['raw_images'].apply(lambda img_urls: [uutil.fix_imgurl(img) for img in img_urls])
+    df_gaf['raw_links'] = df_gaf['raw_links'].apply(lambda urls: [uutil.fix_urlscheme(url) for url in urls])
     df_gaf['body_extracts'].apply(fix_bodylinks) # In place OP
 
     df_gaf['languages'] = extract_languages(df_gaf)
     
-    df_gaf['dirslug'] = df_gaf['ptid'] + '_' + df_gaf['post_link'].apply(url_to_dirname)
+    #df_gaf['dirslug'] = df_gaf['ptid'] + '_' + df_gaf['post_link'].apply(uutil.url_to_dirname)
 
     df_gaf['text_links'] = df_gaf['body_extracts'].apply(lambda subp: [i['text_link'] for i in subp])
     
     return df_gaf
 
-
-
-def is_imageurl(link):
-    linkpath = urllib.parse.urlparse(link).path
-    if re.search(r'\.(jpe?g|png|gif|bmp|webp|avif)', linkpath, re.IGNORECASE):
-        return True
-    return False
-
-
-def extract_links(df_gaf):
+def extract_img_links(df_gaf):
     '''
-    Extracts all the links from the body_extracts and raw_links columns
+    Extracts all image links from raw_images, raw_links, and body_extracts columns and return frame with imgurl and ptid 
     '''
-    raw_images = df_gaf['raw_images']
-    bodyex_images = df_gaf['body_extracts'].apply(lambda exts: [e['img_attrs']['src'] for e in exts])
-    bodyex_ilinks = df_gaf['body_extracts'].apply(lambda xtrcs: [*filter(is_imageurl,[x['img_link'] for x in xtrcs])])
+    df_gaimg = df_gaf[['ptid','raw_images','body_extracts','raw_links']].copy()
+    df_gaimg['imgurl'] = (
+        df_gaimg['raw_images']
+        + df_gaimg['body_extracts'].apply(lambda xtrcs: [x['img_attrs']['src'] for x in xtrcs]
+                                        + [*filter(uutil.is_imageurl, [x['img_link'] for x in xtrcs])])
+        + df_gaimg['raw_links'].apply(lambda links: [*filter(uutil.is_imageurl,links)])
+    )
+
+    df_gaimg = df_gaimg[['imgurl','ptid']]
+    df_gaimg = df_gaimg.explode('imgurl')
+    df_gaimg['imgurl'] = df_gaimg['imgurl'].apply(uutil.fix_imgurl)
+    df_gaimg = df_gaimg.drop_duplicates('imgurl')
     
-    return raw_images,bodyex_images,bodyex_ilinks
+    return df_gaimg
 
+def get_datelinkdf(df_gaf):
+    if isinstance(df_gaf, (str, Path)):
+        df_gaf = process_gafile(df_gaf)
+    df_dlinks = df_gaf[['post_date','raw_links']].copy()
+    df_dlinks['post_date'] = pd.to_datetime(df_dlinks.post_date, format='%b %d, %Y').dt.date
+    df_dlinks = df_dlinks.explode('raw_links')
+    df_dlinks = df_dlinks[df_dlinks.raw_links.apply(uutil.link_filter)]
+    df_dlinks = df_dlinks.rename(columns={'raw_links':'url'})
 
-
-def link_clean(link):
-    # TODO: use regex if faster/simpler
-    url_ignore = ['www.amazon','amzn.to','amzn.com','ravelry.com','greatamigurumi.blogspot','mailto:','drive.google.com','youtube.com','facebook.com']
-    ext_ignore = ['.jpg','.png','.jpeg','.pdf','.gif','.bmp']
-    llink = link.lower()
-    return not (any(dom in llink for dom in url_ignore) or any(llink.endswith(ext) for ext in ext_ignore))
-
-
-def read_datelinks(ga_file):
-    with open(ga_file,'r') as f:
-        flat_post_data = flatten_gadata(json.load(f))
-    
-    date_links = [(fpd['post_date'],fpd['body']['raw_links']) for fpd in flat_post_data]
-    # month day, Year (%b %d, %Y) -> datetime.date()
-    cleaned_date_links = [(datetime.strptime(pdate, '%b %d, %Y').date(),link) for (pdate,link_set) in date_links for link in filter(link_clean,link_set)]
-    return cleaned_date_links
+    return df_dlinks
