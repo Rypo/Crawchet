@@ -1,18 +1,47 @@
-
+import time
 from pathlib import Path
+
 import pandas as pd
 from tqdm.auto import tqdm
+
 from warcio.archiveiterator import ArchiveIterator
 from warcio.warcwriter import WARCWriter
 
 from waybackpy import WaybackMachineCDXServerAPI
 from waybackpy.exceptions import NoCDXRecordFound
+import requests
 
 
 def to_wbmts_format(post_dates: pd.Series):
     return post_dates.pipe(pd.to_datetime).dt.strftime('%Y%m%d')+'0'*6
 
-def search_wayback(urls, wayback_timestamps):
+
+def wayback_search(url, wayback_timestamp, timeout=0):
+    UA = "Mozilla/5.0 (Windows NT 5.1; rv:40.0) Gecko/20100101 Firefox/40.0"
+    empty_record = dict.fromkeys(['status','available','url','timestamp'])
+    try:
+        rsp = requests.get('https://archive.org/wayback/available', params={'url':url, 'timestamp':wayback_timestamp}, timeout=32, headers={'User-Agent':UA})
+        if rsp.status_code == 429:
+            next_timeout = timeout+5
+            print(f'Rate limited, waiting {next_timeout} seconds...')
+            time.sleep(next_timeout)
+            return wayback_search(url, wayback_timestamp, next_timeout)
+        
+        rsp.raise_for_status()    
+        jrsp = rsp.json()
+        record = {**jrsp['archived_snapshots'].get('closest',empty_record), 'original': jrsp['url']}
+    except Exception as e:
+        print(url,e)
+        record = {**empty_record, 'original': url}
+    
+    record['archive_url'] = record.pop('url')
+    return record
+
+def wayback_search_all(urls, wayback_timestamps):
+    return [wayback_search(url, wmts) for url,wmts in tqdm(zip(urls,wayback_timestamps), total=len(urls))]
+
+
+def cdx_wayback_search(urls, wayback_timestamps):
     '''
     Search Wayback Machine for archive entries for each of the urls nearest to the timestamp.
 
@@ -76,6 +105,14 @@ class ArchiveManager:
                     parsed.append(extracts)
 
         return parsed
+
+    def to_dataframe(self, warc_file=None):
+        df_records = pd.DataFrame(self.parse_records(warc_file))
+        df_records['content_length'] = df_records['content_length'].astype(int)
+        df_records['status'] = df_records['statusline'].str.split().str[0].astype(int)
+        df_records = df_records.drop(columns='statusline')
+        
+        return df_records
 
     def extract_metadata(self, archive_dir, warc_file=None):
         arcpath = Path(archive_dir)
