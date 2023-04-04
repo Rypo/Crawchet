@@ -1,11 +1,7 @@
 import time
-from pathlib import Path
-from tqdm.auto import tqdm
 from warcio.capture_http import capture_http
 import requests # requests must be imported after capture_http
 from bs4 import BeautifulSoup
-
-from crawchet.process import greatami
 
 
 class GreatAmigurumiScraper:
@@ -18,7 +14,6 @@ class GreatAmigurumiScraper:
 
     def extract_link_image(self, a_img):
         return {'img_link':a_img['href'], 'img_attrs':a_img.find('img').attrs}
-
 
     def build_text(self, a):
         '''Build up text from sibilings that surround <a> tag.
@@ -120,30 +115,3 @@ class GreatAmigurumiScraper:
                 time.sleep(timeout)
             
         return site_data
-
-def dl_greatami_imgs(imgurl_lists, dir_slugs, base_outdir, overwrite=False):
-    base_outpath = Path(base_outdir)
-    
-    with requests.Session() as session:
-        
-        for img_links,dir_slug in tqdm(zip(imgurl_lists,dir_slugs), total=len(imgurl_lists)):    
-            outdir = base_outpath/dir_slug
-            outdir.mkdir(exist_ok=True)
-            
-            for link in img_links:
-                if not isinstance(link,str):
-                    continue
-                fname = greatami.url_to_fname(link)
-                outfile = outdir/fname
-                
-                if not outfile.exists() or overwrite:
-                    try:
-                        if link.startswith('//'):
-                            link = 'http:'+link
-                        imgbytes = session.get(link).content
-                        outfile.write_bytes(imgbytes)
-                        print('wrote to:',outfile.as_posix())
-                    except Exception as e:
-                        print('Failed:',link)
-                        print(outfile.as_posix())
-                        print(e)
