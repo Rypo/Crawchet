@@ -44,8 +44,8 @@ def write_images(out_results, base_outdir):
             write_image(url, ptid, content, base_outdir)
 
 
-def extract_imgurls(readable_path):
-    with open(readable_path) as f:
+def extract_imgurls(simphtml_path):
+    with open(simphtml_path) as f:
         df_readti = pd.DataFrame([r['data'] for r in json.load(f)])
     
     df_imgs = df_readti[['text','ptid']].copy()
@@ -60,7 +60,7 @@ def extract_imgurls(readable_path):
 
 if __name__ == '__main__':
     img_dir =  ioutil.resolve_path('../data/raw/images/')
-    readable_path = ioutil.resolve_path('../data/staged/jsonhtml/readabled.json')
+    simphtml_path = ioutil.resolve_path('../data/staged/simphtml.json')
     gafile_path = ioutil.resolve_path('../data/interim/greatamigurumi.json')
 
     #dl_greatami_imgs(gafile_path, img_dir, overwrite=False)
@@ -71,7 +71,7 @@ if __name__ == '__main__':
     
     write_images(out_results, img_dir)
     
-    df_imgs = extract_imgurls(readable_path)
+    df_imgs = extract_imgurls(simphtml_path)
     iac = ImageAsyncCrawler()
     out_results = asyncio.get_event_loop().run_until_complete(iac.crawl_urls([*zip(df_imgs.imgurl, df_imgs.ptid)]))
     

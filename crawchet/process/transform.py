@@ -108,16 +108,16 @@ def write_json(df_dedup, outfile):
 
     return df_dedup
 
-def parallel_simplify(df_master_path='../data/interim/df_master.pkl', json_out_path='../data/staged/jsonhtml/readabled.json', n_jobs=-5):
+def parallel_simplify(df_master_path='../data/interim/df_master.pkl', json_out_path='../data/staged/simphtml.json', n_jobs=-5):
     df_master = pd.read_pickle(df_master_path)
     hproc = parsehtml.HTMLProcessor()
     
     pre_parsed = Parallel(n_jobs)(delayed(hproc.preprocess)(c,u,to_soup=False) for c,u in tqdm(zip(df_master.content,df_master.url), total=len(df_master)))
 
     #readable_jsons = Parallel(n_jobs)(delayed(simplify_html)(c.decode()) for c in tqdm(pre_parsed))
-    readable_jsons = Parallel(n_jobs)(delayed(simple_json_from_html_string)(c.decode(), use_readability=True) for c in tqdm(pre_parsed))
+    simphtml_jsons = Parallel(n_jobs)(delayed(simple_json_from_html_string)(c.decode(), use_readability=True) for c in tqdm(pre_parsed))
     
-    df_rdable = pd.DataFrame(readable_jsons, index=df_master.index)
+    df_rdable = pd.DataFrame(simphtml_jsons, index=df_master.index)
     df_rdable['ttext'] = (('<h1><strong>'+df_rdable.title+'</strong></h1>')+df_rdable.content).fillna('')
     df_master['text'] = df_rdable['ttext']
     write_json(df_master, json_out_path)
